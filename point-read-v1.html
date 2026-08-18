@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>指哪读哪 · 指尖指向识别</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0b0f14;
+      color: #fff;
+      font-family: system-ui, -apple-system, "PingFang SC", sans-serif;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
+    }
+    #bar {
+      position: fixed; top: 0; left: 0; right: 0;
+      z-index: 50;
+      padding: 10px 12px;
+      text-align: center;
+      font-size: 14px;
+      font-weight: 700;
+      background: #0e7490;
+      box-shadow: 0 2px 12px rgba(0,0,0,.35);
+    }
+    #bar.lock { background: #db2777; }
+    #bar.busy { background: #7c3aed; }
+    #bar.done { background: #059669; }
+    #bar.warn { background: #b45309; }
+
+    #stage {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      background: #000;
+    }
+    video, #view {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+    }
+    video { opacity: 0; pointer-events: none; }
+
+    #tipDot {
+      position: absolute;
+      width: 22px; height: 22px;
+      margin: -11px 0 0 -11px;
+      border-radius: 50%;
+      border: 2px solid #22d3ee;
+      background: rgba(244, 114, 182, .85);
+      box-shadow: 0 0 12px rgba(34, 211, 238, .7);
+      z-index: 25;
+      display: none;
+      pointer-events: none;
+    }
+    #tipDot.locking {
+      border-color: #f472b6;
+      animation: tipPulse .8s ease infinite;
+    }
+    @keyframes tipPulse {
+      50% { transform: scale(1.25); opacity: .85; }
+    }
+
+    #progress {
+      position: absolute;
+      width: 56px; height: 4px;
+      margin-left: -28px;
+      background: rgba(255,255,255,.25);
+      border-radius: 2px;
+      overflow: hidden;
+      z-index: 26;
+      display: none;
+      pointer-events: none;
+    }
+    #progress.show { display: block; }
+    #progress > i {
+      display: block; height: 100%; width: 0%;
+      background: linear-gradient(90deg, #22d3ee, #f472b6);
+    }
+
+    #liveLabel {
+      position: absolute;
+      left: 50%; top: 48px;
+      transform: translateX(-50%);
+      z-index: 30;
+      font-size: 12px;
+      color: #e2e8f0;
+      background: rgba(0,0,0,.5);
+      padding: 3px 10px;
+      border-radius: 8px;
+      pointer-events: none;
+      max-width: 90%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #genOverlay {
+      display: none;
+      position: absolute; inset: 0;
+      z-index: 35;
+      background: rgba(0,0,0,.4);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      pointer-events: none;
+    }
+    #genOverlay.show { display: flex; }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid rgba(255,255,255,.2);
+      border-top-color: #a78bfa;
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #descCard {
+      display: none;
+      position: absolute;
+      left: 12px; right: 12px;
+      top: 52px;
+      z-index: 40;
+      background: rgba(15, 23, 42, .92);
+      border: 1px solid rgba(148, 163, 184, .4);
+      border-radius: 12px;
+      padding: 12px;
+      max-height: 26vh;
+      overflow: auto;
+      backdrop-filter: blur(8px);
+    }
+    #descCard.show { display: block; }
+    #descCard .tag {
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 700;
+      color: #67e8f9;
+      background: rgba(6, 182, 212, .15);
+      padding: 2px 8px;
+      border-radius: 6px;
+      margin-bottom: 6px;
+    }
+    #descText {
+      font-size: 14px;
+      line-height: 1.5;
+      color: #e2e8f0;
+      white-space: pre-wrap;
+    }
+
+    #chatPanel {
+      display: none;
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      height: 40vh;
+      z-index: 45;
+      background: rgba(15, 23, 42, .96);
+      border-top: 1px solid #334155;
+      flex-direction: column;
+    }
+    #chatPanel.open { display: flex; }
+    #chatHead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      border-bottom: 1px solid #1e293b;
+      font-size: 13px;
+      font-weight: 700;
+      color: #a5f3fc;
+    }
+    #chatHead button {
+      background: #334155;
+      padding: 6px 10px;
+      font-size: 12px;
+      border-radius: 6px;
+      border: none;
+      color: #fff;
+    }
+    #chatLog {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px 12px;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .msg {
+      margin-bottom: 10px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      max-width: 92%;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .msg.user { background: #0e7490; margin-left: auto; }
+    .msg.bot { background: #1e293b; border: 1px solid #334155; }
+    .msg .who { font-size: 11px; opacity: .7; margin-bottom: 3px; }
+    #chatInputRow {
+      display: flex;
+      gap: 8px;
+      padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+      border-top: 1px solid #1e293b;
+    }
+    #chatInput {
+      flex: 1;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid #475569;
+      background: #0f172a;
+      color: #f1f5f9;
+      font-size: 14px;
+    }
+    #sendBtn {
+      padding: 10px 14px;
+      border: none;
+      border-radius: 10px;
+      background: #0891b2;
+      color: #fff;
+      font-weight: 700;
+      font-size: 14px;
+    }
+
+    #hint {
+      position: fixed;
+      bottom: 88px; left: 0; right: 0;
+      text-align: center;
+      font-size: 12px;
+      color: rgba(255,255,255,.72);
+      z-index: 30;
+      pointer-events: none;
+      padding: 0 12px;
+    }
+    #hint.hide { display: none; }
+
+    #controls {
+      position: fixed;
+      bottom: 14px; left: 0; right: 0;
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      z-index: 50;
+      padding: 0 8px;
+    }
+    #controls button {
+      padding: 10px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      border: none;
+      border-radius: 10px;
+      background: #0891b2;
+      color: #fff;
+      box-shadow: 0 3px 10px rgba(0,0,0,.3);
+    }
+    #stopBtn { background: #64748b; }
+    #switchBtn { background: #7c3aed; }
+    #lockBtn { background: #db2777; }
+    #keyBtn { background: #059669; }
+    #chatBtn { background: #ea580c; }
+
+    #keyPanel {
+      display: none;
+      position: fixed;
+      left: 12px; right: 12px;
+      bottom: 100px;
+      z-index: 70;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 12px;
+    }
+    #keyPanel.open { display: block; }
+    #keyPanel label {
+      font-size: 12px;
+      color: #94a3b8;
+      display: block;
+      margin-bottom: 4px;
+    }
+    #keyPanel input {
+      width: 100%;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #475569;
+      background: #1e293b;
+      color: #e2e8f0;
+      margin-bottom: 8px;
+    }
+    #keyPanel .row { display: flex; gap: 8px; }
+    #keyPanel .row button {
+      flex: 1; padding: 10px; border: none; border-radius: 8px;
+      background: #0891b2; color: #fff; font-weight: 600;
+    }
+    #keyTip { font-size: 11px; color: #64748b; line-height: 1.4; }
+
+    #modelStatus {
+      position: fixed;
+      top: 44px; right: 8px;
+      z-index: 48;
+      font-size: 10px;
+      color: rgba(255,255,255,.55);
+      background: rgba(0,0,0,.4);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466023/camera_utils.js"></script>
+</head>
+<body>
+  <div id="bar">加载模型中…</div>
+  <div id="modelStatus">初始化</div>
+
+  <div id="stage">
+    <video id="video" playsinline webkit-playsinline muted></video>
+    <canvas id="view"></canvas>
+    <div id="tipDot"></div>
+    <div id="progress"><i id="progFill"></i></div>
+    <div id="liveLabel"></div>
+    <div id="genOverlay">
+      <div class="spinner"></div>
+      <p style="font-size:14px;font-weight:600">识别并生成描述…</p>
+    </div>
+    <div id="descCard">
+      <div class="tag" id="descTag">识别类别</div>
+      <div id="descText"></div>
+    </div>
+    <div id="chatPanel">
+      <div id="chatHead">
+        <span>DeepSeek 追问</span>
+        <button type="button" id="closeChatBtn">收起</button>
+      </div>
+      <div id="chatLog"></div>
+      <div id="chatInputRow">
+        <input id="chatInput" type="text" placeholder="继续追问…" enterkeyhint="send">
+        <button type="button" id="sendBtn">发送</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="hint">伸出食指指向物体，指尖稳住约 2 秒即可读取</div>
+
+  <div id="keyPanel">
+    <label>DeepSeek API Key（仅存本机）</label>
+    <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off">
+    <div class="row">
+      <button type="button" id="saveKeyBtn">保存</button>
+      <button type="button" id="closeKeyBtn" style="background:#64748b">关闭</button>
+    </div>
+    <div id="keyTip">
+      指尖跟踪与物体类别在本地完成；DeepSeek 负责中文描述与聊天。<br>
+      Key：https://platform.deepseek.com/api_keys
+    </div>
+  </div>
+
+  <div id="controls">
+    <button id="startBtn">开始</button>
+    <button id="switchBtn">切换</button>
+    <button id="lockBtn">手动读取</button>
+    <button id="chatBtn">聊天</button>
+    <button id="keyBtn">API Key</button>
+    <button id="stopBtn">停止</button>
+  </div>
+
+  <script>
+    const COCO_ZH = {
+      person: '人', bicycle: '自行车', car: '汽车', motorcycle: '摩托车', airplane: '飞机',
+      bus: '公交车', train: '火车', truck: '卡车', boat: '船', 'traffic light': '红绿灯',
+      'fire hydrant': '消防栓', 'stop sign': '停止标志', 'parking meter': '停车计时器',
+      bench: '长椅', bird: '鸟', cat: '猫', dog: '狗', horse: '马', sheep: '羊', cow: '牛',
+      elephant: '大象', bear: '熊', zebra: '斑马', giraffe: '长颈鹿', backpack: '背包',
+      umbrella: '雨伞', handbag: '手提包', tie: '领带', suitcase: '行李箱', frisbee: '飞盘',
+      skis: '滑雪板', snowboard: '单板滑雪', 'sports ball': '球', kite: '风筝',
+      'baseball bat': '棒球棒', 'baseball glove': '棒球手套', skateboard: '滑板',
+      surfboard: '冲浪板', 'tennis racket': '网球拍', bottle: '瓶子', 'wine glass': '酒杯',
+      cup: '杯子', fork: '叉子', knife: '刀', spoon: '勺子', bowl: '碗', banana: '香蕉',
+      apple: '苹果', sandwich: '三明治', orange: '橙子', broccoli: '西兰花', carrot: '胡萝卜',
+      'hot dog': '热狗', pizza: '披萨', donut: '甜甜圈', cake: '蛋糕', chair: '椅子',
+      couch: '沙发', 'potted plant': '盆栽', bed: '床', 'dining table': '餐桌',
+      toilet: '马桶', tv: '电视', laptop: '笔记本电脑', mouse: '鼠标', remote: '遥控器',
+      keyboard: '键盘', 'cell phone': '手机', microwave: '微波炉', oven: '烤箱',
+      toaster: '烤面包机', sink: '水槽', refrigerator: '冰箱', book: '书', clock: '时钟',
+      vase: '花瓶', scissors: '剪刀', 'teddy bear': '泰迪熊', 'hair drier': '吹风机',
+      toothbrush: '牙刷'
+    };
+
+    const video = document.getElementById('video');
+    const view = document.getElementById('view');
+    const vctx = view.getContext('2d', { willReadFrequently: true });
+    const bar = document.getElementById('bar');
+    const tipDot = document.getElementById('tipDot');
+    const progress = document.getElementById('progress');
+    const progFill = document.getElementById('progFill');
+    const liveLabel = document.getElementById('liveLabel');
+    const genOverlay = document.getElementById('genOverlay');
+    const descCard = document.getElementById('descCard');
+    const descTag = document.getElementById('descTag');
+    const descText = document.getElementById('descText');
+    const chatPanel = document.getElementById('chatPanel');
+    const chatLog = document.getElementById('chatLog');
+    const chatInput = document.getElementById('chatInput');
+    const hint = document.getElementById('hint');
+    const keyPanel = document.getElementById('keyPanel');
+    const apiKeyInput = document.getElementById('apiKey');
+    const modelStatus = document.getElementById('modelStatus');
+
+    let detector = null;
+    let hands = null;
+    let stream = null;
+    let running = false;
+    let rafId = null;
+    let preferredFacing = 'user'; // 指尖更适合前置自拍角度；可切换后置
+    let needMirror = true;
+    let busy = false;
+    let lastTs = 0;
+    let stableMs = 0;
+    let tipHistory = [];
+    let lastTip = null; // canvas pixel coords
+    let lastPreds = [];
+    let detectTick = 0;
+    let chatMessages = [];
+    let handsReady = false;
+
+    const HOLD_MS = 2000;
+    const TIP_STABLE_PX = 28; // 指尖抖动阈值（画布像素）
+
+    try {
+      const k = localStorage.getItem('deepseek_api_key');
+      if (k) apiKeyInput.value = k;
+    } catch (e) {}
+
+    function setBar(t, mode) {
+      bar.textContent = t;
+      bar.className = mode || '';
+    }
+
+    function zhName(en) {
+      return COCO_ZH[en] || en;
+    }
+
+    function getKey() {
+      return (apiKeyInput.value || '').trim();
+    }
+
+    // —— 模型加载 ——
+    (async function initModels() {
+      try {
+        modelStatus.textContent = '加载 TF…';
+        await tf.ready();
+        modelStatus.textContent = '加载物体模型…';
+        detector = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+        modelStatus.textContent = '加载手势模型…';
+
+        hands = new Hands({
+          locateFile: (file) =>
+            `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`
+        });
+        hands.setOptions({
+          maxNumHands: 1,
+          modelComplexity: 0,
+          minDetectionConfidence: 0.6,
+          minTrackingConfidence: 0.5
+        });
+        hands.onResults(onHandsResults);
+        handsReady = true;
+        modelStatus.textContent = '模型就绪';
+        setBar('就绪 · 点「开始」后用食指指向');
+      } catch (e) {
+        console.error(e);
+        modelStatus.textContent = '模型加载异常';
+        setBar('模型加载失败，请刷新重试', 'warn');
+      }
+    })();
+
+    function stopAll() {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = null;
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+        stream = null;
+      }
+      video.srcObject = null;
+      running = false;
+      stableMs = 0;
+      tipHistory = [];
+      lastTip = null;
+      tipDot.style.display = 'none';
+      progress.classList.remove('show');
+      liveLabel.textContent = '';
+    }
+
+    async function openCamera(facing) {
+      stopAll();
+      await new Promise(r => setTimeout(r, 250));
+      const attempts = [
+        { video: { facingMode: { ideal: facing }, width: { ideal: 640 }, height: { ideal: 480 } }, audio: false },
+        { video: { facingMode: facing }, audio: false },
+        { video: true, audio: false }
+      ];
+      let err;
+      for (const c of attempts) {
+        try { return await navigator.mediaDevices.getUserMedia(c); }
+        catch (e) { err = e; }
+      }
+      throw err || new Error('无法打开摄像头');
+    }
+
+    function detectFacing(s) {
+      const t = s.getVideoTracks()[0];
+      const set = t && t.getSettings ? t.getSettings() : {};
+      if (set.facingMode === 'user' || set.facingMode === 'environment') return set.facingMode;
+      return preferredFacing;
+    }
+
+    async function start() {
+      if (running || busy) return;
+      if (!handsReady) {
+        alert('手势模型还在加载，请稍候');
+        return;
+      }
+      try {
+        setBar('打开摄像头…');
+        stream = await openCamera(preferredFacing);
+        const actual = detectFacing(stream);
+        needMirror = actual === 'user';
+        video.srcObject = stream;
+        video.muted = true;
+        video.setAttribute('playsinline', 'true');
+        await video.play();
+        running = true;
+        lastTs = performance.now();
+        stableMs = 0;
+        tipHistory = [];
+        setBar('伸出食指指向物体 · ' + (actual === 'environment' ? '后置' : '前置'));
+        hint.classList.remove('hide');
+        loop();
+      } catch (e) {
+        setBar('摄像头失败', 'warn');
+        alert('无法打开摄像头：' + (e.message || e.name));
+      }
+    }
+
+    // MediaPipe Hands 结果：landmark 8 = 食指指尖
+    function onHandsResults(results) {
+      if (!running || busy) return;
+      const w = view.width;
+      const h = view.height;
+      if (!w || !h) return;
+
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length) {
+        const lm = results.multiHandLandmarks[0];
+        const tip = lm[8]; // index fingertip
+        // MediaPipe 归一化坐标：x 向右，y 向下；前置镜像时画面已镜像绘制
+        let px = tip.x * w;
+        let py = tip.y * h;
+        if (needMirror) {
+          // 视频画到 canvas 时做了水平镜像，手部坐标需同步镜像
+          px = (1 - tip.x) * w;
+        }
+        lastTip = { x: px, y: py, raw: tip };
+        tipDot.style.display = 'block';
+        tipDot.style.left = (px / w * 100) + '%';
+        tipDot.style.top = (py / h * 100) + '%';
+        progress.style.left = (px / w * 100) + '%';
+        progress.style.top = 'calc(' + (py / h * 100) + '% + 16px)';
+      } else {
+        lastTip = null;
+        tipDot.style.display = 'none';
+        progress.classList.remove('show');
+        tipDot.classList.remove('locking');
+        stableMs = 0;
+        tipHistory = [];
+      }
+    }
+
+    function tipIsStable(tip, dt) {
+      tipHistory.push({ x: tip.x, y: tip.y, t: performance.now() });
+      // 只保留最近 0.6s
+      const cutoff = performance.now() - 600;
+      tipHistory = tipHistory.filter(p => p.t >= cutoff);
+      if (tipHistory.length < 4) return false;
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (const p of tipHistory) {
+        minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+        minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+      }
+      return (maxX - minX) < TIP_STABLE_PX && (maxY - minY) < TIP_STABLE_PX;
+    }
+
+    function pickNearTip(preds, tip, w, h) {
+      if (!tip) return null;
+      let best = null;
+      let bestScore = Infinity;
+      for (const p of preds) {
+        if (p.score < 0.35) continue;
+        const [x, y, bw, bh] = p.bbox;
+        const ox = x + bw / 2;
+        const oy = y + bh / 2;
+        const inside = tip.x >= x && tip.x <= x + bw && tip.y >= y && tip.y <= y + bh;
+        const dist = Math.hypot(ox - tip.x, oy - tip.y);
+        const score = inside ? dist * 0.25 : dist;
+        if (score < bestScore) {
+          bestScore = score;
+          best = p;
+        }
+      }
+      if (best && bestScore > Math.min(w, h) * 0.4) {
+        const [x, y, bw, bh] = best.bbox;
+        const inside = tip.x >= x && tip.x <= x + bw && tip.y >= y && tip.y <= y + bh;
+        if (!inside) return null;
+      }
+      return best;
+    }
+
+    function drawPreds(preds) {
+      for (const p of preds) {
+        if (p.score < 0.4) continue;
+        const [x, y, bw, bh] = p.bbox;
+        vctx.strokeStyle = 'rgba(34,211,238,0.65)';
+        vctx.lineWidth = 2;
+        vctx.strokeRect(x, y, bw, bh);
+        const label = zhName(p.class) + ' ' + Math.round(p.score * 100) + '%';
+        vctx.font = '12px sans-serif';
+        const tw = vctx.measureText(label).width;
+        vctx.fillStyle = 'rgba(0,0,0,0.55)';
+        vctx.fillRect(x, Math.max(0, y - 16), tw + 6, 16);
+        vctx.fillStyle = '#67e8f9';
+        vctx.fillText(label, x + 3, Math.max(12, y - 4));
+      }
+    }
+
+    async function deepseekChat(messages) {
+      const key = getKey();
+      if (!key) throw new Error('请先填写 DeepSeek API Key');
+      const res = await fetch('https://api.deepseek.com/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + key
+        },
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          messages,
+          temperature: 0.5,
+          max_tokens: 600
+        })
+      });
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(res.status + ' ' + t.slice(0, 160));
+      }
+      const data = await res.json();
+      return (data.choices && data.choices[0] && data.choices[0].message.content || '').trim();
+    }
+
+    async function generateDescription(hit, allPreds) {
+      const en = hit ? hit.class : 'unknown';
+      const zh = hit ? zhName(en) : '未知物体';
+      const conf = hit ? Math.round(hit.score * 100) : 0;
+      const others = (allPreds || [])
+        .filter(p => p.score > 0.4)
+        .slice(0, 5)
+        .map(p => zhName(p.class))
+        .join('、');
+
+      const system = `你是「指哪读哪」助手。用户用食指指向画面中的物体，本地模型已给出类别（COCO，类别有限，看不到真实颜色/文字/年龄）。
+请用中文写 60～120 字说明：指到了什么、置信度含义、这类物体常见特征与用途，并提醒无法从真实画面读取品牌/颜色/人物细节。不要列表，不要英文。`;
+
+      const user = `指尖指向结果：
+- 目标：${zh}（${en}，约 ${conf}%）
+- 画面中还可能有：${others || '无'}
+请生成描述。`;
+
+      const text = await deepseekChat([
+        { role: 'system', content: system },
+        { role: 'user', content: user }
+      ]);
+
+      chatMessages = [
+        {
+          role: 'system',
+          content: `用户用手指指向物体。本地识别：${zh}（${en}，约${conf}%）。还可能有：${others || '无'}。
+基于此回答追问；若需真实画面细节，说明本地无法提供。简洁中文。`
+        },
+        { role: 'assistant', content: text }
+      ];
+      return { zh, conf, text };
+    }
+
+    function appendChat(role, text) {
+      const div = document.createElement('div');
+      div.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
+      div.innerHTML = '<div class="who">' + (role === 'user' ? '我' : 'DeepSeek') + '</div>' +
+        text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      chatLog.appendChild(div);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    async function captureAndDescribe() {
+      if (busy || !running) return;
+      if (!getKey()) {
+        keyPanel.classList.add('open');
+        setBar('请先填写 API Key', 'warn');
+        return;
+      }
+
+      busy = true;
+      tipDot.classList.remove('locking');
+      progress.classList.remove('show');
+      genOverlay.classList.add('show');
+      hint.classList.add('hide');
+      setBar('读取中…', 'busy');
+
+      try {
+        let hit = null;
+        if (detector) {
+          const preds = await detector.detect(view);
+          lastPreds = preds;
+          hit = pickNearTip(preds, lastTip, view.width, view.height);
+        }
+        const result = await generateDescription(hit, lastPreds);
+        descTag.textContent = result.zh + (result.conf ? ' · ' + result.conf + '%' : '');
+        descText.textContent = result.text;
+        descCard.classList.add('show');
+        chatLog.innerHTML = '';
+        appendChat('bot', result.text);
+        setBar('完成 · 可打开「聊天」追问', 'done');
+        if (navigator.vibrate) navigator.vibrate([25, 30, 25]);
+      } catch (e) {
+        console.error(e);
+        setBar('失败', 'warn');
+        descTag.textContent = '错误';
+        descText.textContent = String(e.message || e);
+        descCard.classList.add('show');
+      } finally {
+        genOverlay.classList.remove('show');
+        busy = false;
+        stableMs = 0;
+        tipHistory = [];
+      }
+    }
+
+    async function sendChat() {
+      const text = (chatInput.value || '').trim();
+      if (!text || busy) return;
+      if (!getKey()) {
+        keyPanel.classList.add('open');
+        return;
+      }
+      if (!chatMessages.length) {
+        alert('请先用指尖读取一次，再聊天');
+        return;
+      }
+      chatInput.value = '';
+      appendChat('user', text);
+      chatMessages.push({ role: 'user', content: text });
+      busy = true;
+      setBar('回复中…', 'busy');
+      try {
+        const reply = await deepseekChat(chatMessages);
+        chatMessages.push({ role: 'assistant', content: reply });
+        appendChat('bot', reply);
+        setBar('聊天中', 'done');
+      } catch (e) {
+        appendChat('bot', '失败：' + (e.message || e));
+        setBar('聊天失败', 'warn');
+      } finally {
+        busy = false;
+      }
+    }
+
+    async function loop() {
+      if (!running) return;
+      const now = performance.now();
+      const dt = now - lastTs;
+      lastTs = now;
+
+      const vw = video.videoWidth || 640;
+      const vh = video.videoHeight || 480;
+      if (view.width !== vw || view.height !== vh) {
+        view.width = vw;
+        view.height = vh;
+      }
+
+      // 绘制镜像视频
+      vctx.save();
+      vctx.clearRect(0, 0, vw, vh);
+      if (needMirror) {
+        vctx.translate(vw, 0);
+        vctx.scale(-1, 1);
+      }
+      vctx.drawImage(video, 0, 0, vw, vh);
+      vctx.restore();
+
+      // 送入手势模型（用未镜像的 video，结果里再按 needMirror 映射）
+      if (hands && video.readyState >= 2) {
+        try {
+          await hands.send({ image: video });
+        } catch (e) {}
+      }
+
+      // 物体检测节流
+      detectTick++;
+      if (detector && detectTick % 4 === 0) {
+        try {
+          const preds = await detector.detect(view);
+          lastPreds = preds;
+          drawPreds(preds);
+          if (lastTip) {
+            const hit = pickNearTip(preds, lastTip, vw, vh);
+            liveLabel.textContent = hit
+              ? ('指向：' + zhName(hit.class) + ' ' + Math.round(hit.score * 100) + '%')
+              : '指尖已识别 · 对准物体';
+          }
+        } catch (e) {}
+      } else if (lastPreds.length) {
+        drawPreds(lastPreds);
+      }
+
+      const chatOpen = chatPanel.classList.contains('open');
+      if (!busy && !chatOpen && lastTip) {
+        if (tipIsStable(lastTip, dt)) {
+          stableMs += dt;
+          tipDot.classList.add('locking');
+          progress.classList.add('show');
+          progFill.style.width = Math.min(100, (stableMs / HOLD_MS) * 100) + '%';
+          setBar('锁定中 ' + Math.ceil(Math.max(0, HOLD_MS - stableMs) / 1000) + 's…', 'lock');
+          if (stableMs >= HOLD_MS) captureAndDescribe();
+        } else {
+          stableMs = Math.max(0, stableMs - dt);
+          tipDot.classList.remove('locking');
+          if (stableMs < 150) {
+            progress.classList.remove('show');
+            progFill.style.width = '0%';
+            if (!busy) setBar('食指指向物体并保持稳定');
+          } else {
+            progFill.style.width = Math.min(100, (stableMs / HOLD_MS) * 100) + '%';
+          }
+        }
+      }
+
+      rafId = requestAnimationFrame(loop);
+    }
+
+    document.getElementById('startBtn').onclick = start;
+    document.getElementById('stopBtn').onclick = () => {
+      stopAll();
+      descCard.classList.remove('show');
+      chatPanel.classList.remove('open');
+      setBar('已停止');
+    };
+    document.getElementById('switchBtn').onclick = async () => {
+      preferredFacing = preferredFacing === 'environment' ? 'user' : 'environment';
+      if (running) await start();
+      else setBar('已切换，点开始');
+    };
+    document.getElementById('lockBtn').onclick = () => {
+      if (!running) { alert('请先开始'); return; }
+      captureAndDescribe();
+    };
+    document.getElementById('chatBtn').onclick = () => {
+      chatPanel.classList.toggle('open');
+      if (chatPanel.classList.contains('open')) {
+        hint.classList.add('hide');
+        chatInput.focus();
+      }
+    };
+    document.getElementById('closeChatBtn').onclick = () => chatPanel.classList.remove('open');
+    document.getElementById('keyBtn').onclick = () => keyPanel.classList.add('open');
+    document.getElementById('saveKeyBtn').onclick = () => {
+      try { localStorage.setItem('deepseek_api_key', apiKeyInput.value.trim()); } catch (e) {}
+      keyPanel.classList.remove('open');
+      setBar('Key 已保存');
+    };
+    document.getElementById('closeKeyBtn').onclick = () => keyPanel.classList.remove('open');
+    document.getElementById('sendBtn').onclick = sendChat;
+    chatInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') sendChat();
+    });
+
+    window.addEventListener('beforeunload', stopAll);
+  </script>
+</body>
+</html>
